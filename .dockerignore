@@ -1,0 +1,12 @@
+.git
+.github
+target
+dashboard/node_modules
+dashboard/dist
+**/.DS_Store
+**/*.md
+!README.md
+benches/out
+.env
+.env.*
+!.env.example
