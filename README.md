@@ -92,7 +92,7 @@ Coverage includes:
 - **Unit:** correctness (duplicate / OOO / watermark), replay pacing + speed parsing
 - **Integration:** ordered `seq`, idempotent duplicate ingest, OOO alerts, REST round-trip, max-speed replay completion, `/healthz`
 
-CI (GitHub Actions) runs `fmt`, `clippy -D warnings`, `cargo test` with Postgres/Redis service containers, dashboard build + smoke, and Docker image builds.
+CI (GitHub Actions) runs `fmt`, `clippy -D warnings`, `cargo test` with Postgres/Redis service containers, dashboard build + smoke, and Docker image builds. On `main`, CD pushes server/dashboard images to GHCR.
 
 ## Workspace
 

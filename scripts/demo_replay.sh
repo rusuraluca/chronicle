@@ -2,11 +2,18 @@
 set -euo pipefail
 
 URL="${CHRONICLE_URL:-http://127.0.0.1:8080}"
-STREAM="${STREAM:-demo}"
 
 if [[ ! -f /tmp/chronicle_demo_base.txt ]]; then
   echo "missing /tmp/chronicle_demo_base.txt — run scripts/seed_demo.sh first" >&2
   exit 1
+fi
+
+if [[ -n "${STREAM:-}" ]]; then
+  :
+elif [[ -f /tmp/chronicle_demo_stream.txt ]]; then
+  STREAM="$(cat /tmp/chronicle_demo_stream.txt)"
+else
+  STREAM="demo"
 fi
 
 FROM="$(cat /tmp/chronicle_demo_base.txt)"
@@ -19,10 +26,27 @@ PY
 )"
 
 echo "Starting 10x replay on ${STREAM} from ${FROM} to ${TO}"
-curl -fsS -X POST "${URL}/v1/replays" \
+RESP="$(curl -fsS -X POST "${URL}/v1/replays" \
   -H 'content-type: application/json' \
-  -d "{\"stream_id\":\"${STREAM}\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"speed\":\"10x\"}" \
-  | tee /tmp/chronicle_demo_replay.json
+  -d "{\"stream_id\":\"${STREAM}\",\"from\":\"${FROM}\",\"to\":\"${TO}\",\"speed\":\"10x\"}")"
+echo "${RESP}" | tee /tmp/chronicle_demo_replay.json
+REPLAY_ID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["replay_id"])' <<<"${RESP}")"
 
-echo
-echo "Poll with: curl -s ${URL}/v1/replays/\$(jq -r .replay_id /tmp/chronicle_demo_replay.json)"
+echo "Waiting for replay ${REPLAY_ID}..."
+for _ in $(seq 1 60); do
+  STATUS_JSON="$(curl -fsS "${URL}/v1/replays/${REPLAY_ID}")"
+  STATUS="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])' <<<"${STATUS_JSON}")"
+  EMITTED="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["events_emitted"])' <<<"${STATUS_JSON}")"
+  echo "  status=${STATUS} events_emitted=${EMITTED}"
+  case "${STATUS}" in
+    completed|failed|cancelled)
+      echo "${STATUS_JSON}"
+      [[ "${STATUS}" == "completed" ]] || exit 1
+      exit 0
+      ;;
+  esac
+  sleep 0.5
+done
+
+echo "replay did not finish in time" >&2
+exit 1

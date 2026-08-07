@@ -2,7 +2,8 @@
 set -euo pipefail
 
 URL="${CHRONICLE_URL:-http://127.0.0.1:8080}"
-STREAM="${STREAM:-demo}"
+# Fresh stream each run so prior ingest watermarks do not flag OOO.
+STREAM="${STREAM:-demo-$(date -u +%Y%m%d%H%M%S)}"
 
 echo "Waiting for Chronicle at ${URL}..."
 for _ in $(seq 1 60); do
@@ -13,8 +14,6 @@ for _ in $(seq 1 60); do
 done
 curl -fsS "${URL}/healthz" >/dev/null
 
-BASE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-# Portable: use python for RFC3339 offsets when available
 python3 - <<PY
 import json, urllib.request, datetime
 url = "${URL}".rstrip("/")
@@ -38,4 +37,6 @@ print("seeded 10 events on stream", stream)
 print("BASE_TIME", base.isoformat().replace("+00:00", "Z"))
 with open("/tmp/chronicle_demo_base.txt", "w") as f:
     f.write(base.isoformat().replace("+00:00", "Z"))
+with open("/tmp/chronicle_demo_stream.txt", "w") as f:
+    f.write(stream)
 PY
