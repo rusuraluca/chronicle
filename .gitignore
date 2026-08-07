@@ -1,0 +1,36 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Node / dashboard
+node_modules/
+dashboard/dist/
+dashboard/.vite/
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Benchmarks / local artifacts
+/benches/out/
+*.profraw
+*.profdata
+
+# Docker
+.docker/
+
+# Coverage
+coverage/
+lcov.info
+tarpaulin-report.html
