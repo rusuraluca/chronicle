@@ -1,0 +1,241 @@
+:root {
+  --ink: #14201c;
+  --muted: #4a5c54;
+  --paper: #e8efe9;
+  --panel: rgba(255, 255, 255, 0.72);
+  --line: rgba(20, 32, 28, 0.12);
+  --accent: #0f6b4c;
+  --warn: #9a4d12;
+  --danger: #8b1e3f;
+  --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  color: var(--ink);
+  font-family: var(--mono);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(15, 107, 76, 0.18), transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, rgba(154, 77, 18, 0.12), transparent 50%),
+    linear-gradient(165deg, #f3f7f4 0%, var(--paper) 45%, #d9e5dc 100%);
+}
+
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+.brand-bar {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  align-items: flex-end;
+  margin-bottom: 2rem;
+  animation: rise 0.7s ease-out both;
+}
+
+.brand {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: clamp(2.8rem, 6vw, 4.2rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+}
+
+.tagline {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.nav button,
+.primary {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.nav button.active,
+.primary {
+  background: var(--accent);
+  color: #f4faf6;
+  border-color: transparent;
+}
+
+.nav button:hover,
+.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.panel {
+  display: grid;
+  gap: 2rem;
+  animation: rise 0.8s 0.08s ease-out both;
+}
+
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.metric {
+  padding: 1rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  animation: fade 0.9s ease both;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.metric-value {
+  font-family: var(--serif);
+  font-size: 1.55rem;
+  font-weight: 600;
+}
+
+section h2 {
+  margin: 0 0 0.35rem;
+  font-family: var(--serif);
+  font-size: 1.55rem;
+}
+
+.section-note {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.7rem 0.8rem;
+  border-bottom: 1px solid var(--line);
+}
+
+th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.list li {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.list li:last-child {
+  border-bottom: 0;
+}
+
+.alerts .pill {
+  display: inline-block;
+  margin-right: 0.55rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.alerts .pill.duplicate {
+  color: var(--warn);
+}
+
+.alerts .pill.out_of_order {
+  color: var(--danger);
+}
+
+.error {
+  color: var(--danger);
+  background: rgba(139, 30, 63, 0.08);
+  border: 1px solid rgba(139, 30, 63, 0.2);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.bench-grid {
+  margin-top: 1.25rem;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .brand-bar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

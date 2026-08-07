@@ -34,3 +34,4 @@ dashboard/.vite/
 coverage/
 lcov.info
 tarpaulin-report.html
+dump.rdb

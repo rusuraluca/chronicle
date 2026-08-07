@@ -1,0 +1,24 @@
+[package]
+name = "chronicle-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Shared types and correctness logic for Chronicle"
+
+[dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_json = { workspace = true }
+
+[[bench]]
+name = "pacing"
+path = "../../benches/pacing.rs"
+harness = false
