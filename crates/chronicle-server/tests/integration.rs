@@ -8,7 +8,7 @@ use std::time::Instant;
 use chronicle_core::IngestRequest;
 use chronicle_server::http::{self, AppState};
 use chronicle_server::ingest::IngestService;
-use chronicle_server::store::EventStore;
+use chronicle_server::store::{EventStore, RedisFanout};
 use chrono::{TimeZone, Utc};
 use serde_json::json;
 use tower::ServiceExt;
@@ -25,7 +25,11 @@ fn require_integration() -> bool {
     )
 }
 
-async fn try_connect() -> Option<EventStore> {
+fn redis_url() -> String {
+    std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".into())
+}
+
+async fn try_connect() -> Option<(EventStore, RedisFanout)> {
     let store = match EventStore::connect(&database_url()).await {
         Ok(s) => s,
         Err(err) => {
@@ -43,11 +47,21 @@ async fn try_connect() -> Option<EventStore> {
         eprintln!("skipping integration tests: migrate failed ({err})");
         return None;
     }
-    Some(store)
+    let redis = match RedisFanout::connect(&redis_url()).await {
+        Ok(r) => r,
+        Err(err) => {
+            if require_integration() {
+                panic!("redis unavailable (required): {err}");
+            }
+            eprintln!("skipping integration tests: redis unavailable ({err})");
+            return None;
+        }
+    };
+    Some((store, redis))
 }
 
-async fn build_app(store: EventStore) -> axum::Router {
-    let ingest = IngestService::new(store.clone());
+async fn build_app(store: EventStore, redis: RedisFanout) -> axum::Router {
+    let ingest = IngestService::new(store.clone(), redis);
     http::router(AppState {
         ingest,
         store,
@@ -61,10 +75,10 @@ fn unique_stream(prefix: &str) -> String {
 
 #[tokio::test]
 async fn healthz_ok() {
-    let Some(store) = try_connect().await else {
+    let Some((store, redis)) = try_connect().await else {
         return;
     };
-    let app = build_app(store).await;
+    let app = build_app(store, redis).await;
     let res = app
         .oneshot(
             axum::http::Request::builder()
@@ -79,11 +93,11 @@ async fn healthz_ok() {
 
 #[tokio::test]
 async fn ordered_sequence_assignment() {
-    let Some(store) = try_connect().await else {
+    let Some((store, redis)) = try_connect().await else {
         return;
     };
     let stream = unique_stream("seq");
-    let ingest = IngestService::new(store);
+    let ingest = IngestService::new(store, redis);
     let t0 = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
     for i in 0..3 {
         let resp = ingest
@@ -105,11 +119,11 @@ async fn ordered_sequence_assignment() {
 
 #[tokio::test]
 async fn duplicate_ingest_is_idempotent() {
-    let Some(store) = try_connect().await else {
+    let Some((store, redis)) = try_connect().await else {
         return;
     };
     let stream = unique_stream("dup");
-    let ingest = IngestService::new(store.clone());
+    let ingest = IngestService::new(store.clone(), redis.clone());
     let req = IngestRequest {
         event_id: "same".into(),
         event_time: Utc::now(),
@@ -126,11 +140,11 @@ async fn duplicate_ingest_is_idempotent() {
 
 #[tokio::test]
 async fn out_of_order_flagged_and_alerted() {
-    let Some(store) = try_connect().await else {
+    let Some((store, redis)) = try_connect().await else {
         return;
     };
     let stream = unique_stream("ooo");
-    let ingest = IngestService::new(store.clone());
+    let ingest = IngestService::new(store.clone(), redis);
     let t_hi = Utc.timestamp_opt(1_700_000_100, 0).unwrap();
     let t_lo = Utc.timestamp_opt(1_700_000_050, 0).unwrap();
     ingest
@@ -166,11 +180,11 @@ async fn out_of_order_flagged_and_alerted() {
 
 #[tokio::test]
 async fn rest_ingest_roundtrip() {
-    let Some(store) = try_connect().await else {
+    let Some((store, redis)) = try_connect().await else {
         return;
     };
     let stream = unique_stream("rest");
-    let app = build_app(store).await;
+    let app = build_app(store, redis).await;
     let body = serde_json::json!({
         "event_id": "r1",
         "event_time": "2024-01-01T00:00:00Z",

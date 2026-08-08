@@ -1,16 +1,17 @@
 use chronicle_core::{EventEnvelope, IngestRequest, IngestResponse};
 use tracing::instrument;
 
-use crate::store::EventStore;
+use crate::store::{EventStore, RedisFanout};
 
 #[derive(Clone)]
 pub struct IngestService {
     store: EventStore,
+    redis: RedisFanout,
 }
 
 impl IngestService {
-    pub fn new(store: EventStore) -> Self {
-        Self { store }
+    pub fn new(store: EventStore, redis: RedisFanout) -> Self {
+        Self { store, redis }
     }
 
     #[instrument(skip(self, req), fields(stream_id = %stream_id, event_id = %req.event_id))]
@@ -32,6 +33,21 @@ impl IngestService {
             payload: req.payload,
         };
 
-        self.store.append(stream_id, envelope).await
+        let response = self.store.append(stream_id, envelope.clone()).await?;
+
+        if !response.duplicate {
+            // Fan-out only newly accepted events. Replays read from Postgres.
+            if let Some(record) = self
+                .store
+                .find_by_event_id(stream_id, &response.event_id)
+                .await?
+            {
+                if let Err(err) = self.redis.publish(&record).await {
+                    tracing::warn!(error = %err, "redis publish failed; durable write succeeded");
+                }
+            }
+        }
+
+        Ok(response)
     }
 }
