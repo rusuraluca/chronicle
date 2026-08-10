@@ -40,9 +40,11 @@ services:
       DATABASE_URL: postgres://chronicle:chronicle@postgres:5432/chronicle
       REDIS_URL: redis://redis:6379
       CHRONICLE_HTTP_ADDR: 0.0.0.0:8080
+      CHRONICLE_GRPC_ADDR: 0.0.0.0:50051
       RUST_LOG: chronicle_server=info,tower_http=info,info
     ports:
       - "8080:8080"
+      - "50051:50051"
     depends_on:
       postgres:
         condition: service_healthy
