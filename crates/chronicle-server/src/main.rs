@@ -1,10 +1,11 @@
 use std::time::Instant;
 
 use chronicle_server::config::Config;
-use chronicle_server::grpc;
-use chronicle_server::http::{self, AppState};
+use chronicle_server::http::AppState;
 use chronicle_server::ingest::IngestService;
+use chronicle_server::replay::ReplayEngine;
 use chronicle_server::store::{EventStore, RedisFanout};
+use chronicle_server::{grpc, http, metrics};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -15,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
         .init();
 
+    metrics::init()?;
     let config = Config::from_env()?;
     info!(?config.http_addr, ?config.grpc_addr, "starting chronicle-server");
 
@@ -31,10 +33,13 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let ingest = IngestService::new(store.clone(), redis);
+    let ingest = IngestService::new(store.clone(), redis.clone());
+    let replay = ReplayEngine::new(store.clone(), redis.clone());
     let state = AppState {
         ingest: ingest.clone(),
+        replay,
         store,
+        redis,
         started_at: Instant::now(),
     };
 

@@ -1,9 +1,10 @@
 use chronicle_core::{
-    evaluate_event, CorrectnessDecision, EventEnvelope, EventRecord, IngestResponse, StreamStats,
-    StreamWatermark,
+    evaluate_event, CorrectnessDecision, EventEnvelope, EventRecord, IngestResponse, ReplayRequest,
+    ReplaySpeed, ReplayStatus, ReplayStatusKind, StreamStats, StreamWatermark,
 };
 use chrono::{DateTime, Utc};
 use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct EventStore {
@@ -136,6 +137,8 @@ impl EventStore {
             .await?;
 
             tx.commit().await?;
+            metrics::counter!("chronicle_duplicates_total", "stream" => stream_id.to_string())
+                .increment(1);
 
             return Ok(IngestResponse {
                 stream_id: stream_id.to_string(),
@@ -205,9 +208,13 @@ impl EventStore {
             ))
             .execute(&mut *tx)
             .await?;
+            metrics::counter!("chronicle_out_of_order_total", "stream" => stream_id.to_string())
+                .increment(1);
         }
 
         tx.commit().await?;
+        metrics::counter!("chronicle_events_ingested_total", "stream" => stream_id.to_string())
+            .increment(1);
 
         Ok(IngestResponse {
             stream_id: stream_id.to_string(),
@@ -271,6 +278,91 @@ impl EventStore {
         Ok(rows.into_iter().map(Into::into).collect())
     }
 
+    pub async fn create_replay(&self, req: &ReplayRequest) -> anyhow::Result<ReplayStatus> {
+        let replay_id = Uuid::new_v4().to_string();
+        let speed = speed_to_str(req.speed);
+        sqlx::query(
+            r#"
+            INSERT INTO replays (replay_id, stream_id, from_time, to_time, speed, status)
+            VALUES ($1, $2, $3, $4, $5, 'pending')
+            "#,
+        )
+        .bind(&replay_id)
+        .bind(&req.stream_id)
+        .bind(req.from)
+        .bind(req.to)
+        .bind(speed)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(ReplayStatus {
+            replay_id,
+            stream_id: req.stream_id.clone(),
+            from: req.from,
+            to: req.to,
+            speed: req.speed,
+            status: ReplayStatusKind::Pending,
+            events_emitted: 0,
+            started_at: None,
+            finished_at: None,
+            error: None,
+        })
+    }
+
+    pub async fn update_replay(&self, status: &ReplayStatus) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE replays
+            SET status = $2,
+                events_emitted = $3,
+                started_at = $4,
+                finished_at = $5,
+                error = $6
+            WHERE replay_id = $1
+            "#,
+        )
+        .bind(&status.replay_id)
+        .bind(status_to_str(status.status))
+        .bind(status.events_emitted)
+        .bind(status.started_at)
+        .bind(status.finished_at)
+        .bind(&status.error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_replay(&self, replay_id: &str) -> anyhow::Result<Option<ReplayStatus>> {
+        let row = sqlx::query_as::<_, ReplayRow>(
+            r#"
+            SELECT replay_id, stream_id, from_time, to_time, speed, status,
+                   events_emitted, started_at, finished_at, error
+            FROM replays
+            WHERE replay_id = $1
+            "#,
+        )
+        .bind(replay_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(|r| r.try_into()).transpose()
+    }
+
+    pub async fn list_replays(&self, limit: i64) -> anyhow::Result<Vec<ReplayStatus>> {
+        let rows = sqlx::query_as::<_, ReplayRow>(
+            r#"
+            SELECT replay_id, stream_id, from_time, to_time, speed, status,
+                   events_emitted, started_at, finished_at, error
+            FROM replays
+            ORDER BY created_at DESC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
     pub async fn recent_alerts(&self, limit: i64) -> anyhow::Result<Vec<Alert>> {
         let rows = sqlx::query_as::<_, Alert>(
             r#"
@@ -284,6 +376,56 @@ impl EventStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)
+    }
+
+    pub async fn storage_bytes(&self) -> anyhow::Result<i64> {
+        let (bytes,): (i64,) = sqlx::query_as(
+            r#"
+            SELECT COALESCE(pg_total_relation_size('events'), 0)
+                 + COALESCE(pg_total_relation_size('streams'), 0)
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(bytes)
+    }
+
+    pub async fn record_bench(
+        &self,
+        label: &str,
+        events_per_sec: f64,
+        replay_latency_ms: f64,
+        storage_bytes: i64,
+        notes: Option<&str>,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO bench_runs (label, events_per_sec, replay_latency_ms, storage_bytes, notes)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(label)
+        .bind(events_per_sec)
+        .bind(replay_latency_ms)
+        .bind(storage_bytes)
+        .bind(notes)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn latest_bench(&self) -> anyhow::Result<Option<BenchRun>> {
+        let row = sqlx::query_as::<_, BenchRun>(
+            r#"
+            SELECT id, label, events_per_sec, replay_latency_ms, storage_bytes, notes, created_at
+            FROM bench_runs
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
     }
 
     async fn ensure_stream_tx(
@@ -400,6 +542,39 @@ impl From<StreamStatsRow> for StreamStats {
     }
 }
 
+#[derive(Debug, sqlx::FromRow)]
+struct ReplayRow {
+    replay_id: String,
+    stream_id: String,
+    from_time: DateTime<Utc>,
+    to_time: DateTime<Utc>,
+    speed: String,
+    status: String,
+    events_emitted: i64,
+    started_at: Option<DateTime<Utc>>,
+    finished_at: Option<DateTime<Utc>>,
+    error: Option<String>,
+}
+
+impl TryFrom<ReplayRow> for ReplayStatus {
+    type Error = anyhow::Error;
+
+    fn try_from(r: ReplayRow) -> Result<Self, Self::Error> {
+        Ok(Self {
+            replay_id: r.replay_id,
+            stream_id: r.stream_id,
+            from: r.from_time,
+            to: r.to_time,
+            speed: ReplaySpeed::parse(&r.speed).map_err(anyhow::Error::msg)?,
+            status: parse_status(&r.status)?,
+            events_emitted: r.events_emitted,
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            error: r.error,
+        })
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
 pub struct Alert {
     pub id: i64,
@@ -409,4 +584,45 @@ pub struct Alert {
     pub seq: Option<i64>,
     pub message: String,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, sqlx::FromRow)]
+pub struct BenchRun {
+    pub id: i64,
+    pub label: String,
+    pub events_per_sec: f64,
+    pub replay_latency_ms: f64,
+    pub storage_bytes: i64,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+fn speed_to_str(speed: ReplaySpeed) -> &'static str {
+    match speed {
+        ReplaySpeed::OneX => "1x",
+        ReplaySpeed::TenX => "10x",
+        ReplaySpeed::HundredX => "100x",
+        ReplaySpeed::Max => "max",
+    }
+}
+
+fn status_to_str(status: ReplayStatusKind) -> &'static str {
+    match status {
+        ReplayStatusKind::Pending => "pending",
+        ReplayStatusKind::Running => "running",
+        ReplayStatusKind::Completed => "completed",
+        ReplayStatusKind::Failed => "failed",
+        ReplayStatusKind::Cancelled => "cancelled",
+    }
+}
+
+fn parse_status(raw: &str) -> anyhow::Result<ReplayStatusKind> {
+    Ok(match raw {
+        "pending" => ReplayStatusKind::Pending,
+        "running" => ReplayStatusKind::Running,
+        "completed" => ReplayStatusKind::Completed,
+        "failed" => ReplayStatusKind::Failed,
+        "cancelled" => ReplayStatusKind::Cancelled,
+        other => anyhow::bail!("unknown replay status `{other}`"),
+    })
 }
