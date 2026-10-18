@@ -1,6 +1,6 @@
 # Chronicle
 
-**Chronicle** is an open-source ordered event log with duplicate / out-of-order detection and variable-speed replay.
+**Chronicle** is an ordered event log with duplicate / out-of-order detection and variable-speed replay.
 
 Repository: https://github.com/rusuraluca/chronicle
 
