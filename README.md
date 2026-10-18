@@ -2,8 +2,6 @@
 
 **Chronicle** is an open-source ordered event log with duplicate / out-of-order detection and variable-speed replay.
 
-> First impression this repo should leave: *she understands production data pipelines.*
-
 Repository: https://github.com/rusuraluca/chronicle
 
 ## What it does
